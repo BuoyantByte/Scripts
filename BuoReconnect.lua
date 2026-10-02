@@ -1,0 +1,603 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local function checkFileSystemSupport()
+    local supported = {
+        isfolder = isfolder,
+        makefolder = makefolder,
+        listfiles = listfiles,
+        isfile = isfile,
+        readfile = readfile,
+        writefile = writefile
+    }
+    
+    for name, func in pairs(supported) do
+        if not func then
+            warn("File system function not supported: " .. name)
+            return false
+        end
+    end
+    return true
+end
+
+local fileSystemEnabled = checkFileSystemSupport()
+
+local function normalizePath(path)
+    return path:gsub("\\\\", "/")
+end
+
+local Window = Rayfield:CreateWindow({
+    Name = "BuoReconnect",
+    Icon = 0,
+    LoadingTitle = "BuoReconnect",
+    LoadingSubtitle = "by BuoyantByte",
+    ShowText = "BuoReconnect",
+    Theme = "Default",
+    ToggleUIKeybind = "K",
+    DisableRayfieldPrompts = true,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = false,
+        FolderName = "BuoReconnect",
+        FileName = "Preset 1"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "noinvitelink",
+        RememberJoins = true
+    },
+    KeySystem = false,
+    KeySettings = {
+        Title = "Untitled",
+        Subtitle = "Key System",
+        Note = "No method of obtaining the key is provided",
+        FileName = "Key",
+        SaveKey = true,
+        GrabKeyFromSite = false,
+        Key = {"Hello"}
+    }
+})
+
+local home   = Window:CreateTab("Home", 127099021069839)
+local alt    = Window:CreateTab("Alt", 95949997618327)
+local config = Window:CreateTab("Config", 102970103256222)
+
+local Players         = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService     = game:GetService("HttpService")
+local GuiService      = game:GetService("GuiService")
+
+local player = Players.LocalPlayer
+local userId = tostring(player.UserId)
+
+local targetPlayerName = nil
+local isTargetEnabled  = false
+
+local function rejoinSelf()
+    if #game.JobId > 0 then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    else
+        TeleportService:Teleport(game.PlaceId, player)
+    end
+end
+
+local Slider
+local DropdownTargetPlayer
+local ToggleTargetPlayer
+
+Slider = home:CreateSlider({
+    Name = "Restart Time",
+    Range = {1, 24},
+    Increment = 1,
+    Suffix = "Hours",
+    CurrentValue = 5,
+    Flag = "RestartTimeSlider",
+    Callback = function(Value) end,
+})
+
+local reconnectTime = 0
+local endTime = 0
+local timerRunning = false
+local previousSliderValue = 5
+local timeleft
+
+local function restartTimerFromNow()
+    if reconnectTime > 0 then
+        endTime = os.time() + reconnectTime
+        timerRunning = true
+        local hours = reconnectTime / 3600
+        print("=== TIMER START (FRESH) ===")
+        print("[Timer] Started for " .. hours .. " hours")
+        print("[Timer] End time:", endTime)
+        print("============================")
+    else
+        timerRunning = false
+        print("[Timer] Stopped")
+    end
+end
+
+local function adjustTimer(newValue)
+    print("\n=== ADJUST TIMER ===")
+    print("[Timer] Old:", previousSliderValue, "hours | New:", newValue, "hours")
+    
+    local now = os.time()
+    
+    if timerRunning and endTime > now then
+        local remainingSeconds = endTime - now
+        local difference = (newValue - previousSliderValue) * 3600
+        local newRemainingSeconds = math.max(0, remainingSeconds + difference)
+        
+        endTime = now + newRemainingSeconds
+        reconnectTime = newValue * 3600
+        
+        local hours = math.floor(newRemainingSeconds / 3600)
+        local minutes = math.floor((newRemainingSeconds % 3600) / 60)
+        
+        print("[Timer] ADJUSTED! Time left:", hours .. "h " .. minutes .. "m")
+        print("[Timer] New end time:", endTime)
+    else
+        print("[Timer] Timer not active, starting fresh")
+        reconnectTime = newValue * 3600
+        restartTimerFromNow()
+    end
+    
+    previousSliderValue = newValue
+    print("====================\n")
+end
+
+timeleft = home:CreateButton({
+    Name = "Time left: Starting...",
+    Callback = function()
+        if timerRunning then
+            local remaining = endTime - os.time()
+            if remaining > 0 then
+                local h = math.floor(remaining / 3600)
+                local m = math.floor((remaining % 3600) / 60)
+                local s = remaining % 60
+                print(string.format("[Info] Exact time: %dh %dm %ds", h, m, s))
+            end
+        else
+            print("[Info] Timer inactive")
+        end
+    end,
+})
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        
+        if timerRunning and reconnectTime > 0 then
+            local now = os.time()
+            local remaining = endTime - now
+            
+            if remaining > 0 then
+                local hours = math.floor(remaining / 3600)
+                local minutes = math.floor((remaining % 3600) / 60)
+                local seconds = remaining % 60
+                
+                if hours >= 1 then
+                    timeleft:Set(string.format("Time left: %dh %dm", hours, minutes))
+                elseif minutes > 0 then
+                    timeleft:Set(string.format("Time left: %dm", minutes))
+                else
+                    timeleft:Set(string.format("Time left: %ds", seconds))
+                end
+                
+                if remaining % 60 == 0 then
+                    print(string.format("[Timer] %dh %dm left", hours, minutes))
+                end
+            else
+                timeleft:Set("Time left: Restarting...")
+                print("[Timer] Time's up! Reconnecting...")
+                rejoinSelf()
+                break
+            end
+        else
+            timeleft:Set("Time left: Inactive")
+        end
+    end
+end)
+
+local function onErrorMessageChanged(errorMessage)
+    if errorMessage and errorMessage ~= "" then
+        print("[Auto-Reconnect] Error:", errorMessage)
+        if player then
+            task.wait(0.5)
+            rejoinSelf()
+        end
+    end
+end
+
+GuiService.ErrorMessageChanged:Connect(onErrorMessageChanged)
+
+Slider.Callback = function(Value)
+    print("\n>>> SLIDER: " .. Value .. " hours <<<")
+    adjustTimer(Value)
+    lastSliderValue = Value
+    SaveCurrentConfig()
+end
+
+print("\n=== INITIAL START ===")
+previousSliderValue = Slider.CurrentValue
+reconnectTime = Slider.CurrentValue * 3600
+restartTimerFromNow()
+print("=====================\n")
+
+DropdownTargetPlayer = alt:CreateDropdown({
+    Name = "TargetPlayer",
+    Options = {},
+    CurrentOption = {""},
+    MultipleOptions = false,
+    Flag = "PlayerInServer",
+    Callback = function(Options) end,
+})
+
+ToggleTargetPlayer = alt:CreateToggle({
+    Name = "Target Player",
+    CurrentValue = false,
+    Flag = "ToggleRestartAlt",
+    Callback = function(Value) end,
+})
+
+local function updatePlayers()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            table.insert(names, p.Name)
+        end
+    end
+    DropdownTargetPlayer:Refresh(names, true)
+end
+
+updatePlayers()
+Players.PlayerAdded:Connect(updatePlayers)
+Players.PlayerRemoving:Connect(function(removedPlayer)
+    updatePlayers()
+    if isTargetEnabled and removedPlayer.Name == targetPlayerName then
+        task.spawn(function()
+            rejoinSelf()
+        end)
+    end
+end)
+
+local configFolder = "BuoReconnect"
+
+if fileSystemEnabled then
+    local folderPath = normalizePath(configFolder)
+    if not isfolder(folderPath) then
+        local success, err = pcall(function()
+            makefolder(folderPath)
+        end)
+        if not success then
+            warn("Failed to create config folder: " .. tostring(err))
+            fileSystemEnabled = false
+        end
+    end
+else
+    warn("File system not supported - configs will not be saved")
+end
+
+local function getConfigFiles()
+    if not fileSystemEnabled then return {} end
+    
+    local files = {}
+    local folderPath = normalizePath(configFolder)
+    
+    local success, result = pcall(function()
+        if isfolder(folderPath) then
+            return listfiles(folderPath)
+        end
+        return {}
+    end)
+    
+    if not success then
+        warn("Failed to list config files: " .. tostring(result))
+        return {}
+    end
+    
+    for _, path in ipairs(result or {}) do
+        local normalizedPath = normalizePath(path)
+        if normalizedPath:sub(-5) == ".rfld" then
+            local name = normalizedPath:match("([^/\\]+)%.rfld$") or normalizedPath
+            table.insert(files, name)
+        end
+    end
+    
+    table.sort(files)
+    return files
+end
+
+local function getNextPresetName()
+    local maxIndex = 0
+    local files = getConfigFiles()
+    for _, name in ipairs(files) do
+        local n = tonumber(name:match("^Preset (%d+)$"))
+        if n and n > maxIndex then
+            maxIndex = n
+        end
+    end
+    return "Preset " .. (maxIndex + 1)
+end
+
+local selectedConfig = nil
+local DropdownConfig
+
+local lastSliderValue = Slider.CurrentValue or 5
+
+local lastUsedFile = normalizePath(configFolder .. "/last_used_" .. userId .. ".txt")
+
+local function saveLastUsedPresetName()
+    if not fileSystemEnabled or not selectedConfig then return end
+    
+    local success, err = pcall(function()
+        writefile(lastUsedFile, selectedConfig)
+    end)
+    if not success then
+        warn("Failed to save last used preset: " .. tostring(err))
+    end
+end
+
+local function loadLastUsedPresetName()
+    if not fileSystemEnabled then return nil end
+    
+    local success, result = pcall(function()
+        if isfile(lastUsedFile) then
+            return readfile(lastUsedFile)
+        end
+        return nil
+    end)
+    
+    if success and result and result ~= "" then
+        return result
+    end
+    return nil
+end
+
+local function getCurrentConfigTable()
+    return {
+        RestartTimeSlider = lastSliderValue,
+        PlayerInServer    = {targetPlayerName or ""},
+        ToggleRestartAlt  = isTargetEnabled,
+    }
+end
+
+function SaveCurrentConfig()
+    if not fileSystemEnabled or not selectedConfig then return end
+    
+    local filePath = normalizePath(configFolder .. "/" .. selectedConfig .. ".rfld")
+    local data = getCurrentConfigTable()
+    
+    local success, err = pcall(function()
+        writefile(filePath, HttpService:JSONEncode(data))
+    end)
+    if not success then
+        warn("Failed to save config: " .. tostring(err))
+    end
+end
+
+Slider.Callback = function(Value)
+    lastSliderValue = Value
+    reconnectTime = Value * 3600
+    restartTimerFromNow()
+    SaveCurrentConfig()
+end
+
+DropdownTargetPlayer.Callback = function(Options)
+    targetPlayerName = Options[1]
+    SaveCurrentConfig()
+end
+
+ToggleTargetPlayer.Callback = function(Value)
+    isTargetEnabled = Value
+    SaveCurrentConfig()
+end
+
+DropdownConfig = config:CreateDropdown({
+    Name = "Select Config",
+    Options = getConfigFiles(),
+    CurrentOption = {""},
+    MultipleOptions = false,
+    Flag = "Config",
+    Callback = function(Options)
+        selectedConfig = Options[1]
+        saveLastUsedPresetName()
+    end,
+})
+
+local function makeDefaultConfig()
+    return {
+        RestartTimeSlider = 5,
+        PlayerInServer    = {""},
+        ToggleRestartAlt  = false,
+    }
+end
+
+local ButtonConfigCreate = config:CreateButton({
+    Name = "Create Config",
+    Callback = function()
+        if not fileSystemEnabled then
+            warn("File system not available - cannot create config")
+            return
+        end
+        
+        local presetName = getNextPresetName()
+        local filePath = normalizePath(configFolder .. "/" .. presetName .. ".rfld")
+
+        local data = makeDefaultConfig()
+        local success, err = pcall(function()
+            writefile(filePath, HttpService:JSONEncode(data))
+        end)
+        
+        if not success then
+            warn("Failed to create config: " .. tostring(err))
+            return
+        end
+
+        local opts = getConfigFiles()
+        DropdownConfig:Refresh(opts, true)
+        DropdownConfig:Set({presetName})
+        selectedConfig = presetName
+        saveLastUsedPresetName()
+
+        if Slider and Slider.Set then
+            Slider:Set(data.RestartTimeSlider)
+            lastSliderValue = data.RestartTimeSlider
+        end
+        if DropdownTargetPlayer and DropdownTargetPlayer.Set then
+            DropdownTargetPlayer:Set(data.PlayerInServer)
+            targetPlayerName = data.PlayerInServer[1] or ""
+        end
+        if ToggleTargetPlayer and ToggleTargetPlayer.Set then
+            ToggleTargetPlayer:Set(data.ToggleRestartAlt)
+            isTargetEnabled = data.ToggleRestartAlt
+        end
+
+        SaveCurrentConfig()
+    end,
+})
+
+local ButtonConfig = config:CreateButton({
+    Name = "Apply Config",
+    Callback = function()
+        if not fileSystemEnabled or not selectedConfig then return end
+
+        local filePath = normalizePath(configFolder .. "/" .. selectedConfig .. ".rfld")
+        
+        local success, content = pcall(function()
+            if isfile(filePath) then
+                return readfile(filePath)
+            end
+            return nil
+        end)
+        
+        if not success or not content then
+            warn("Failed to read config file")
+            return
+        end
+
+        local decodeSuccess, data = pcall(function()
+            return HttpService:JSONDecode(content)
+        end)
+        
+        if not decodeSuccess then
+            warn("Failed to decode config JSON")
+            return
+        end
+
+        if data.RestartTimeSlider and Slider and Slider.Set then
+            Slider:Set(data.RestartTimeSlider)
+            lastSliderValue = data.RestartTimeSlider
+        end
+
+        if data.PlayerInServer and data.PlayerInServer[1] and DropdownTargetPlayer and DropdownTargetPlayer.Set then
+            DropdownTargetPlayer:Set(data.PlayerInServer)
+            targetPlayerName = data.PlayerInServer[1]
+        end
+
+        if data.ToggleRestartAlt ~= nil and ToggleTargetPlayer and ToggleTargetPlayer.Set then
+            ToggleTargetPlayer:Set(data.ToggleRestartAlt)
+            isTargetEnabled = data.ToggleRestartAlt
+        end
+
+        SaveCurrentConfig()
+    end,
+})
+
+local function applyConfigByName(name)
+    if not fileSystemEnabled then return end
+    
+    local filePath = normalizePath(configFolder .. "/" .. name .. ".rfld")
+    
+    local success, exists = pcall(function()
+        return isfile(filePath)
+    end)
+    
+    if not success or not exists then return end
+
+    selectedConfig = name
+    if DropdownConfig and DropdownConfig.Set then
+        DropdownConfig:Set({name})
+    end
+    saveLastUsedPresetName()
+
+    local readSuccess, content = pcall(function()
+        return readfile(filePath)
+    end)
+    
+    if not readSuccess then return end
+
+    local decodeSuccess, data = pcall(function()
+        return HttpService:JSONDecode(content)
+    end)
+    
+    if not decodeSuccess then return end
+
+    if data.RestartTimeSlider and Slider and Slider.Set then
+        Slider:Set(data.RestartTimeSlider)
+        lastSliderValue = data.RestartTimeSlider
+    end
+
+    if data.PlayerInServer and data.PlayerInServer[1] and DropdownTargetPlayer and DropdownTargetPlayer.Set then
+        DropdownTargetPlayer:Set(data.PlayerInServer)
+        targetPlayerName = data.PlayerInServer[1]
+    end
+
+    if data.ToggleRestartAlt ~= nil and ToggleTargetPlayer and ToggleTargetPlayer.Set then
+        ToggleTargetPlayer:Set(data.ToggleRestartAlt)
+        isTargetEnabled = data.ToggleRestartAlt
+    end
+end
+
+local function ensureDefaultConfig()
+    if not fileSystemEnabled then
+        warn("File system disabled - using default settings without saving")
+        return
+    end
+    
+    local files = getConfigFiles()
+    if #files == 0 then
+        local presetName = "Preset 1"
+        local filePath = normalizePath(configFolder .. "/" .. presetName .. ".rfld")
+        local data = makeDefaultConfig()
+        
+        local success = pcall(function()
+            writefile(filePath, HttpService:JSONEncode(data))
+        end)
+        
+        if success then
+            local opts = getConfigFiles()
+            DropdownConfig:Refresh(opts, true)
+            DropdownConfig:Set({presetName})
+            selectedConfig = presetName
+            saveLastUsedPresetName()
+            applyConfigByName(presetName)
+        end
+    else
+        DropdownConfig:Refresh(files, true)
+    end
+end
+
+ensureDefaultConfig()
+
+local filesNow = getConfigFiles()
+local lastName = loadLastUsedPresetName()
+
+if lastName then
+    local exists = false
+    for _, name in ipairs(filesNow) do
+        if name == lastName then
+            exists = true
+            break
+        end
+    end
+    if exists then
+        applyConfigByName(lastName)
+    else
+        if #filesNow > 0 then
+            applyConfigByName(filesNow[1])
+        end
+    end
+else
+    if #filesNow > 0 then
+        applyConfigByName(filesNow[1])
+    end
+end
