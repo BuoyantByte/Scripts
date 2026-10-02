@@ -117,7 +117,7 @@ local Slider = home:CreateSlider({
     Range = {1, 24},
     Increment = 1,
     Suffix = "Hours",
-    CurrentValue = 5,
+    CurrentValue = 24,
     Flag = "RestartTimeSlider",
     Callback = function(Value)
         adjustTimer(Value)
