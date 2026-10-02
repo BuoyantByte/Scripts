@@ -26,7 +26,7 @@ local function normalizePath(path)
 end
 
 local Window = Rayfield:CreateWindow({
-    Name = "EzzBss",
+    Name = "BuoReconnect",
     Icon = 0,
     LoadingTitle = "BuoReconnect",
     LoadingSubtitle = "by BuoyantByte",
